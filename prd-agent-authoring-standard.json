@@ -1,0 +1,283 @@
+{
+  "version": 1,
+  "project": "SDD Specialist Agent Authoring Standard",
+  "overview": "Crear un documento de plantilla estándar (agent-spec-template) que define la estructura obligatoria de todo .agent.md del ecosistema SDD. El estándar resuelve los tres síntomas raíz de rate limit: agentes que no saben cuándo parar, que mezclan prose+código+análisis en el mismo output, y que interpretan el scope de forma ambigua haciendo de más. La plantilla es el contrato de autoría que Palma sigue al crear o modificar cualquier especialista.",
+  "goals": [
+    "Eliminar la ambigüedad de scope en los agentes mediante secciones obligatorias de Entry Conditions y Scope Guards",
+    "Definir Stop Conditions explícitas que indiquen al agente exactamente cuándo su trabajo terminó",
+    "Estandarizar el Output Contract con formato estructurado, tipo de response y presupuesto de tokens",
+    "Separar responsabilidades de output: nunca prose + código + análisis en el mismo response",
+    "Aplicar la plantilla a los 4 especialistas existentes (DB2 Designer, DB2 Verify, RPG Apply, RPG Verify)",
+    "Crear un checklist de validación para auditar cualquier agente nuevo o existente contra el estándar"
+  ],
+  "nonGoals": [
+    "No se construye un meta-agente generador — la plantilla es para autoría manual",
+    "No se modifica la lógica de negocio interna de los especialistas, solo su estructura de instrucciones",
+    "No aplica a SDD Init, Explore, Propose, Spec, Design, Task, Archive en esta PRD (tienen su propio refactor en PRD v2)",
+    "No se crea tooling de validación automática — el checklist es un proceso manual de revisión"
+  ],
+  "successMetrics": [
+    "Todo agente creado con la plantilla completa un flujo orquestado sin length limit errors",
+    "El response inline de cualquier especialista es predecible: siempre el mismo formato, nunca contenido inesperado",
+    "Un agente nuevo puede ser escrito en < 30 minutos siguiendo la plantilla sin ambigüedades",
+    "Los 4 especialistas existentes pasan el checklist de validación tras ser refactorizados"
+  ],
+  "openQuestions": [
+    "¿El max_tokens_hint del Output Contract debe ser un número fijo por tipo de especialista o configurable por invocación?",
+    "¿Las Stop Conditions deben ser verificables por el agente solo (self-check) o también el orquestador las valida externamente?",
+    "¿El Clarification Protocol en modo standalone debe hacer preguntas al usuario o proceder con el mínimo scope asumido?"
+  ],
+  "stack": {
+    "framework": "VS Code + GitHub Copilot Agents (.agent.md)",
+    "hosting": "Local workspace",
+    "persistence": "OpenSpec (openspec/changes/<change-name>/)",
+    "auth": "N/A"
+  },
+  "routes": [],
+  "uiNotes": [],
+  "dataModel": [
+    {
+      "entity": "Agent Spec Template — Secciones obligatorias",
+      "fields": [
+        "## Frontmatter: name, description (trigger-oriented), tools permitidos",
+        "## Role: qué ES este agente en 1 párrafo — sin listar capacidades",
+        "## Entry Conditions: inputs requeridos, estado esperado del workspace antes de activarse",
+        "## Scope: lista positiva (qué hace) + lista negativa explícita (qué NO hace bajo ninguna circunstancia)",
+        "## Output Contract: format, write_to, inline_response_type, max_tokens_hint, content_rules",
+        "## Stop Conditions: criterios explícitos de cuándo el agente debe dejar de generar",
+        "## Mode Block: comportamiento en mode=orchestrated vs mode=standalone",
+        "## Error Protocol: qué retornar cuando algo falla — nunca silencio, nunca asumir"
+      ]
+    },
+    {
+      "entity": "Output Contract (estructura formal)",
+      "fields": [
+        "format: el tipo exacto de artefacto (sql|rpgle|markdown|json|yaml)",
+        "write_to: ruta OpenSpec relativa — obligatorio en mode=orchestrated, opcional en standalone",
+        "inline_response_type: enum(metadata_only | summary_and_path | full_content) — UNO solo, nunca mixto",
+        "max_tokens_hint: número entero — presupuesto de output para el response inline",
+        "content_rules: lista de reglas de contenido — qué incluir y qué prohibir en el output"
+      ]
+    },
+    {
+      "entity": "Stop Conditions (estructura formal)",
+      "fields": [
+        "primary: la condición principal de parada — ej. 'cuando el artefacto está escrito a disco'",
+        "secondary: condiciones adicionales — ej. 'cuando se alcanza max_items sin scope_exceeded'",
+        "never_continue_if: lista de situaciones donde el agente NUNCA debe elaborar más",
+        "self_check: pregunta que el agente se hace antes de continuar generando"
+      ]
+    },
+    {
+      "entity": "Scope Guards (estructura formal)",
+      "fields": [
+        "does: lista corta de responsabilidades únicas del agente (máx 5 items)",
+        "does_not: lista explícita de lo que está fuera de scope — redactado como prohibición activa",
+        "if_asked_outside_scope: instrucción de qué hacer si el usuario pide algo fuera del scope"
+      ]
+    }
+  ],
+  "importFormat": {
+    "description": "N/A",
+    "example": {}
+  },
+  "rules": [
+    "REGLA 1 — Una sola responsabilidad de output: Cada agente produce exactamente UN tipo de artefacto. Nunca prose + código + análisis en el mismo response.",
+    "REGLA 2 — Stop Conditions explícitas son obligatorias: Todo agente debe tener al menos una condición primaria de parada redactada como criterio verificable, no como intención.",
+    "REGLA 3 — Scope Guards en negativo: El Scope de cada agente DEBE listar explícitamente qué no hace. Las instrucciones solo en positivo son la causa raíz de la ambigüedad.",
+    "REGLA 4 — inline_response_type es único e invariable: Un agente no puede retornar metadata_only en un caso y full_content en otro según su criterio. El tipo está fijado en el Output Contract por mode.",
+    "REGLA 5 — Entry Conditions como precondición dura: Si las Entry Conditions no se cumplen, el agente retorna error inmediatamente sin intentar completar la tarea parcialmente.",
+    "REGLA 6 — max_tokens_hint como presupuesto consciente: El agente usa max_tokens_hint como referencia activa durante la generación, no como límite pasivo del sistema.",
+    "REGLA 7 — Error Protocol siempre estructurado: En caso de error, el agente retorna { status: 'error', phase, reason, suggestion } — nunca prosa libre ni silencio.",
+    "REGLA 8 — La descripción del frontmatter es un trigger, no un resumen: Debe responder '¿cuándo me invocan?' no '¿qué hago?'"
+  ],
+  "qualityGates": [
+    "Todo .agent.md nuevo debe pasar el checklist de 8 secciones antes de considerarse completo",
+    "El Output Contract debe tener inline_response_type explícito — si no está, el agente no está listo",
+    "Las Stop Conditions deben ser verificables por un humano leyendo el .agent.md — si son ambiguas, reescribir",
+    "Los Scope Guards deben tener al menos 3 items en la lista 'does_not'"
+  ],
+  "stories": [
+    {
+      "id": "US-001",
+      "title": "Crear el agent-spec-template.md como documento de autoría",
+      "status": "open",
+      "dependsOn": [],
+      "description": "Como autor de agentes SDD, quiero un documento de plantilla con todas las secciones obligatorias pre-definidas, de modo que pueda crear cualquier especialista nuevo completando la plantilla sin inventar estructura.",
+      "acceptanceCriteria": [
+        "Crear openspec/schemas/agent-spec-template.md con las 8 secciones obligatorias completas",
+        "Cada sección incluye: descripción de propósito, instrucciones de llenado y un ejemplo concreto de qué escribir",
+        "La sección ## Frontmatter incluye guía para redactar description como trigger: 'Úsame cuando... Actívame si...'",
+        "La sección ## Role incluye la regla: máximo 1 párrafo, describe qué ES el agente no qué puede hacer",
+        "La sección ## Entry Conditions incluye tabla: Input requerido | Formato esperado | Qué pasa si falta",
+        "La sección ## Scope incluye dos sublistas obligatorias: '### Does' (máx 5 items) y '### Does Not' (mín 3 items)",
+        "La sección ## Output Contract incluye todos los campos formales: format, write_to, inline_response_type, max_tokens_hint, content_rules",
+        "La sección ## Stop Conditions incluye: primary, never_continue_if, self_check question",
+        "La sección ## Mode Block incluye el patrón condicional orchestrated/standalone con placeholders",
+        "La sección ## Error Protocol incluye el schema fijo: { status, phase, reason, suggestion }",
+        "Ejemplo positivo: plantilla llenada correctamente para un agente hipotético 'SQL Formatter'",
+        "Ejemplo negativo: sección ## Scope sin lista 'Does Not' → nota de por qué eso es insuficiente"
+      ]
+    },
+    {
+      "id": "US-002",
+      "title": "Crear el Output Contract specification detallado",
+      "status": "open",
+      "dependsOn": ["US-001"],
+      "description": "Como autor de agentes SDD, quiero una especificación detallada del Output Contract con todos los valores válidos por campo, para no tener que decidir el formato cada vez que creo un agente.",
+      "acceptanceCriteria": [
+        "Crear openspec/schemas/output-contract-spec.md como documento de referencia",
+        "Documentar todos los valores válidos de format con descripción: sql, rpgle, markdown, json, yaml, openspec-spec, openspec-design, openspec-tasks",
+        "Documentar los 3 valores de inline_response_type con cuándo usar cada uno: metadata_only (mode=orchestrated), summary_and_path (transición), full_content (mode=standalone)",
+        "Documentar la regla de max_tokens_hint por categoría de agente: especialista-generador (≤800), especialista-verificador (≤400), orquestador (≤150)",
+        "Documentar content_rules con los 4 tipos de reglas: INCLUDE (qué poner), EXCLUDE (qué omitir), FORMAT (cómo estructurarlo), NEVER (prohibiciones absolutas)",
+        "Incluir tabla de compatibilidad: qué inline_response_type es válido en cada mode",
+        "Ejemplo positivo: Output Contract completo para DB2 Designer en mode=orchestrated",
+        "Ejemplo negativo: Output Contract con inline_response_type=full_content en mode=orchestrated → por qué esto causa length limit"
+      ]
+    },
+    {
+      "id": "US-003",
+      "title": "Crear el Stop Conditions specification detallado",
+      "status": "open",
+      "dependsOn": ["US-001"],
+      "description": "Como autor de agentes SDD, quiero una guía específica para redactar Stop Conditions que sean verificables y efectivas, porque esta es la sección más crítica para prevenir elaboración sin límite.",
+      "acceptanceCriteria": [
+        "Crear openspec/schemas/stop-conditions-guide.md",
+        "Definir la diferencia entre Stop Condition efectiva vs inefectiva con ejemplos de cada una",
+        "Stop Condition efectiva: basada en un evento o estado verificable ('cuando el artefacto está escrito a write_to')",
+        "Stop Condition inefectiva: basada en intención ('cuando hayas terminado el análisis') — documentar por qué no funciona",
+        "Documentar el self_check pattern: una pregunta que el agente se formula internamente antes de continuar — ej. '¿Ya escribí el artefacto a disco? Si sí, mi siguiente acción es retornar el handoff, no seguir elaborando'",
+        "Documentar el never_continue_if pattern con 5 casos universales: scope ya cubierto, artefacto ya escrito, input fuera del scope declarado, max_tokens_hint alcanzado, error en entry conditions",
+        "Incluir 3 ejemplos de Stop Conditions completas para tipos diferentes: generador de código, verificador, archivador",
+        "Ejemplo positivo: Stop Conditions de DB2 Verify que detienen el análisis al primer error encontrado y no continúan buscando más",
+        "Ejemplo negativo: agente sin Stop Conditions que analiza, luego propone mejoras no pedidas, luego da ejemplos adicionales → documentar cómo esto dispara el length limit"
+      ]
+    },
+    {
+      "id": "US-004",
+      "title": "Crear el Scope Guards specification detallado",
+      "status": "open",
+      "dependsOn": ["US-001"],
+      "description": "Como autor de agentes SDD, quiero una guía para redactar Scope Guards en negativo que sean inequívocos, porque las instrucciones solo en positivo son la causa raíz de que los agentes hagan de más.",
+      "acceptanceCriteria": [
+        "Crear openspec/schemas/scope-guards-guide.md",
+        "Documentar el principio core: las instrucciones en positivo describen la intención; las instrucciones en negativo definen el límite — ambas son necesarias",
+        "Definir la redacción correcta de 'Does Not': usar voz activa prohibitiva — 'No genera...', 'No analiza...', 'No propone...' — nunca pasiva o condicional",
+        "Documentar el patrón if_asked_outside_scope: instrucción estándar de qué retornar cuando el usuario pide algo fuera del scope declarado, sin ejecutarlo",
+        "Listar los 5 Scope Guards universales que todo especialista debe incluir en 'Does Not': no mezcla tipos de output, no hace trabajo de otro agente, no propone mejoras no solicitadas, no elabora sobre su propio output, no retiene información relevante para el orquestador",
+        "Incluir anti-patrones comunes: instrucciones de scope que parecen claras pero son ambiguas con análisis de por qué",
+        "Ejemplo positivo: Scope Guards completos de RPG Apply — Does (3 items) + Does Not (5 items) + if_asked_outside_scope",
+        "Ejemplo negativo: agente con Does detallado pero Does Not vacío → análisis de los 3 comportamientos indeseados que emergen"
+      ]
+    },
+    {
+      "id": "US-005",
+      "title": "Crear checklist de validación para auditar agentes existentes y nuevos",
+      "status": "open",
+      "dependsOn": ["US-001", "US-002", "US-003", "US-004"],
+      "description": "Como autor de agentes SDD, quiero un checklist de validación que pueda aplicar a cualquier .agent.md para determinar si cumple el estándar antes de usarlo en producción.",
+      "acceptanceCriteria": [
+        "Crear openspec/schemas/agent-validation-checklist.md",
+        "El checklist tiene 3 niveles: BLOQUEANTE (el agente no debe usarse si falla), IMPORTANTE (debe corregirse pronto), SUGERIDO (mejora de calidad)",
+        "Nivel BLOQUEANTE incluye: Output Contract con inline_response_type definido, al menos 1 Stop Condition primaria verificable, al menos 1 item en Does Not, Entry Conditions documentadas",
+        "Nivel IMPORTANTE incluye: max_tokens_hint presente, Mode Block con orchestrated y standalone diferenciados, Error Protocol con schema { status, phase, reason, suggestion }",
+        "Nivel SUGERIDO incluye: self_check question en Stop Conditions, 5+ items en Does Not, examples en Entry Conditions",
+        "El checklist es autoevaluable: cada item tiene una pregunta de sí/no y la instrucción de corrección si la respuesta es no",
+        "Incluir sección de 'Red Flags': síntomas en el comportamiento del agente que indican qué sección del .agent.md revisar",
+        "Red Flag 'elabora sin límite' → revisar Stop Conditions. Red Flag 'mezcla tipos de output' → revisar Output Contract content_rules. Red Flag 'hace de más' → revisar Scope Guards Does Not",
+        "Ejemplo positivo: checklist aplicado a un agente hipotético que pasa todos los niveles",
+        "Ejemplo negativo: checklist aplicado a un agente con 2 fallos BLOQUEANTES — muestra qué corregir"
+      ]
+    },
+    {
+      "id": "US-006",
+      "title": "Refactorizar DB2 Designer aplicando la plantilla estándar",
+      "status": "open",
+      "dependsOn": ["US-001", "US-002", "US-003", "US-004"],
+      "description": "Como orquestador SDD, quiero que DB2 Designer tenga su .agent.md estructurado con la plantilla estándar para que genere únicamente SQL/DDL dentro del scope declarado y se detenga al escribir el artefacto.",
+      "acceptanceCriteria": [
+        "## Role: DB2 Designer genera DDL (CREATE, ALTER, DROP) y DML estructural para cambios de esquema — una responsabilidad única",
+        "## Entry Conditions: requiere tasks.md (mode=orchestrated) O instrucción directa de schema change (mode=standalone) — si ninguna presente, retorna error inmediato",
+        "## Scope Does: generar SQL estructural válido para DB2 for i, escribir a apply/db2/<task-id>.sql, retornar handoff con path",
+        "## Scope Does Not: no analiza datos existentes, no propone optimizaciones de índices no solicitadas, no genera stored procedures, no valida el SQL (eso es DB2 Verify), no explica el SQL generado a menos que se pida explícitamente",
+        "## Output Contract: format=sql, write_to='changes/<change-name>/apply/db2/<task-id>.sql', inline_response_type=metadata_only (orchestrated) / full_content (standalone), max_tokens_hint=800, content_rules: INCLUDE solo SQL ejecutable, NEVER comentarios extensos ni prosa explicativa",
+        "## Stop Conditions: primary='cuando el archivo .sql está escrito a write_to'; never_continue_if=['el SQL ya está completo', 'se alcanzó el scope de la task', 'el usuario pide análisis adicional no solicitado en el task']; self_check='¿Ya generé el SQL completo para esta task? Si sí, escribo a disco y retorno handoff, no elaboro más'",
+        "## Mode Block: orchestrated → lee task de tasks.md, escribe a OpenSpec, retorna metadata_only; standalone → acepta instrucción libre, retorna SQL completo inline",
+        "## Error Protocol: { status: 'error', phase: 'db2-design', reason: descripción específica, suggestion: siguiente acción recomendada }",
+        "Pasar el checklist de validación nivel BLOQUEANTE e IMPORTANTE sin fallos"
+      ]
+    },
+    {
+      "id": "US-007",
+      "title": "Refactorizar DB2 Verify aplicando la plantilla estándar",
+      "status": "open",
+      "dependsOn": ["US-001", "US-002", "US-003", "US-004"],
+      "description": "Como orquestador SDD, quiero que DB2 Verify valide SQL y se detenga al primer conjunto de issues encontrados, sin proponer reescrituras ni elaborar análisis no solicitados.",
+      "acceptanceCriteria": [
+        "## Role: DB2 Verify valida SQL/DDL generado por DB2 Designer contra reglas de compatibilidad DB2 for i — produce un veredicto estructurado, no reescrituras",
+        "## Entry Conditions: requiere apply/db2/<task-id>.sql existente (orchestrated) O SQL directo del usuario (standalone) — sin input SQL, retorna error inmediato",
+        "## Scope Does: validar sintaxis DB2 for i, detectar incompatibilidades de tipos, verificar referencias de objetos, retornar veredicto estructurado",
+        "## Scope Does Not: no reescribe el SQL (eso es DB2 Designer), no propone alternativas de diseño, no analiza performance, no genera SQL corregido, no elabora sobre mejores prácticas no solicitadas",
+        "## Output Contract: format=markdown, write_to='changes/<change-name>/apply/db2/<task-id>-verify.md', inline_response_type=metadata_only (orchestrated) / full_content (standalone), max_tokens_hint=400, content_rules: INCLUDE veredicto + lista de issues si los hay, FORMAT { status, issues: [{ severity, description, location }] }, NEVER prosa explicativa sin estructura, NEVER reescritura de SQL",
+        "## Stop Conditions: primary='cuando el veredicto está emitido (passed o failed con issues)'; never_continue_if=['veredicto ya emitido', 'se encontró el primer issue bloqueante y está documentado', 'el SQL no tiene issues — retornar passed inmediatamente']; self_check='¿Ya tengo suficiente información para emitir el veredicto? Si sí, escribo el resultado y paro'",
+        "## Mode Block: orchestrated → lee .sql de OpenSpec, escribe verify.md, retorna { status, artifact_path, issues_count }; standalone → acepta SQL inline, retorna veredicto completo inline",
+        "## Error Protocol: { status: 'error', phase: 'db2-verify', reason, suggestion }",
+        "Pasar el checklist de validación nivel BLOQUEANTE e IMPORTANTE sin fallos"
+      ]
+    },
+    {
+      "id": "US-008",
+      "title": "Refactorizar RPG Apply aplicando la plantilla estándar",
+      "status": "open",
+      "dependsOn": ["US-001", "US-002", "US-003", "US-004"],
+      "description": "Como orquestador SDD, quiero que RPG Apply genere código RPG IV/Free delimitado exactamente al scope de la task, sin elaborar subprocedimientos adicionales ni documentación no solicitada.",
+      "acceptanceCriteria": [
+        "## Role: RPG Apply genera código fuente RPG IV/Free para un programa o módulo específico definido en la task — una unidad de código por invocación",
+        "## Entry Conditions: requiere tasks.md con task de phase=rpg (orchestrated) O descripción funcional directa del usuario (standalone) — sin definición funcional, retorna error",
+        "## Scope Does: generar fuente RPG IV/Free compilable, escribir a apply/rpg/<task-id>.rpgle, retornar handoff con path",
+        "## Scope Does Not: no genera programas auxiliares no especificados en la task, no incluye código de ejemplo adicional, no genera datos de prueba, no documenta el código más allá de comentarios inline funcionales, no genera múltiples programas en una sola invocación",
+        "## Output Contract: format=rpgle, write_to='changes/<change-name>/apply/rpg/<task-id>.rpgle', inline_response_type=metadata_only (orchestrated) / full_content (standalone), max_tokens_hint=800, content_rules: INCLUDE solo código RPG ejecutable para la unidad especificada, EXCLUDE bloques de ejemplo o demostración no funcionales, NEVER prosa explicativa fuera de comentarios de código",
+        "## Stop Conditions: primary='cuando el programa definido en la task está completo y escrito a disco'; never_continue_if=['la unidad de código está completa', 'se alcanzó el scope del programa especificado', 'el usuario pregunta sobre otros programas relacionados no incluidos en la task']; self_check='¿El programa definido en esta task está completo y funcional? Si sí, escribo a disco y retorno handoff'",
+        "## Mode Block: orchestrated → lee task de tasks.md, genera .rpgle en OpenSpec, retorna metadata_only; standalone → acepta descripción funcional libre, retorna código completo inline",
+        "## Error Protocol: { status: 'error', phase: 'rpg-apply', reason, suggestion }",
+        "Pasar el checklist de validación nivel BLOQUEANTE e IMPORTANTE sin fallos"
+      ]
+    },
+    {
+      "id": "US-009",
+      "title": "Refactorizar RPG Verify aplicando la plantilla estándar",
+      "status": "open",
+      "dependsOn": ["US-001", "US-002", "US-003", "US-004"],
+      "description": "Como orquestador SDD, quiero que RPG Verify produzca un veredicto estructurado sobre el código generado y se detenga, sin proponer refactoring ni elaborar mejoras no solicitadas.",
+      "acceptanceCriteria": [
+        "## Role: RPG Verify valida código RPG IV/Free generado por RPG Apply contra compilabilidad, lógica y convenciones del proyecto — emite veredicto, no mejoras",
+        "## Entry Conditions: requiere apply/rpg/<task-id>.rpgle existente (orchestrated) O código RPG directo del usuario (standalone) — sin código fuente, retorna error",
+        "## Scope Does: verificar estructura compilable del fuente RPG, detectar errores de lógica evidentes, verificar uso correcto de I/O y estructuras de datos, emitir veredicto estructurado",
+        "## Scope Does Not: no reescribe el código (eso es RPG Apply), no propone refactoring, no optimiza performance, no genera versión corregida del programa, no evalúa estilo más allá de convenciones declaradas en el proyecto",
+        "## Output Contract: format=markdown, write_to='changes/<change-name>/apply/rpg/<task-id>-verify.md', inline_response_type=metadata_only (orchestrated) / full_content (standalone), max_tokens_hint=400, content_rules: INCLUDE veredicto + issues estructurados, FORMAT { status: passed|failed, issues: [{ severity: error|warning, description, line_ref }] }, NEVER código corregido como parte del veredicto, NEVER análisis de mejoras no solicitadas",
+        "## Stop Conditions: primary='cuando el veredicto está emitido con todos los issues identificados'; never_continue_if=['veredicto passed emitido — no buscar más issues', 'issues bloqueantes documentados — no seguir analizando warnings', 'se alcanzó el análisis del scope completo del programa']; self_check='¿Tengo suficiente para emitir un veredicto útil? Si sí, estructuro el resultado y paro'",
+        "## Mode Block: orchestrated → lee .rpgle de OpenSpec, escribe verify.md, retorna { status, artifact_path, issues_count }; standalone → acepta código inline, retorna veredicto completo",
+        "## Error Protocol: { status: 'error', phase: 'rpg-verify', reason, suggestion }",
+        "Pasar el checklist de validación nivel BLOQUEANTE e IMPORTANTE sin fallos"
+      ]
+    },
+    {
+      "id": "US-010",
+      "title": "Test de autoría — crear un nuevo especialista hipotético siguiendo la plantilla",
+      "status": "open",
+      "dependsOn": ["US-001", "US-002", "US-003", "US-004", "US-005"],
+      "description": "Como autor de agentes SDD, quiero verificar que la plantilla es suficientemente clara para crear un especialista nuevo sin consultar documentación adicional, como prueba de que el estándar es completo.",
+      "acceptanceCriteria": [
+        "Crear un .agent.md completo para un especialista hipotético (ej. 'CL Command Generator') siguiendo agent-spec-template.md de inicio a fin",
+        "El proceso de creación no debe requerir decisiones de estructura — solo decisiones de contenido de negocio",
+        "Aplicar el checklist de validación al agente creado y pasar todos los niveles BLOQUEANTE e IMPORTANTE",
+        "Documentar el tiempo de creación — objetivo: < 30 minutos para un especialista nuevo",
+        "Identificar cualquier sección de la plantilla que requirió interpretación o fue ambigua — documentar como mejora",
+        "El agente hipotético resultante debe tener Stop Conditions que lo detengan en < 800 tokens de output en un caso de prueba",
+        "Ejemplo positivo: CL Command Generator creado en 25 minutos, pasa checklist completo",
+        "Ejemplo negativo: si alguna sección de la plantilla resulta ambigua → documentar qué faltaba y actualizar agent-spec-template.md"
+      ]
+    }
+  ]
+}

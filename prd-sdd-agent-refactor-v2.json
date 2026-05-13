@@ -1,0 +1,351 @@
+{
+  "version": 2,
+  "project": "SDD Multi-Agent Ecosystem Refactor — OpenSpec Native",
+  "overview": "Refactorizar el ecosistema de 11 agentes SDD para eliminar length limit errors, formalizar la comunicación inter-agente con message schemas XML tipados, y habilitar modo dual (orquestado/standalone) en los especialistas DB2 y RPG. Toda la persistencia de artefactos ocurre dentro de la estructura OpenSpec existente (openspec/changes/<change-name>/). El orquestador actúa como router puro para equipos de desarrollo completos, sin cargar contenido en su contexto.",
+  "goals": [
+    "Eliminar errores de 'response hit the length limit' mediante output contracts y file-based handoff",
+    "Formalizar un message schema XML tipado para comunicación orquestador ↔ subagente",
+    "Alinear todos los artefactos de orquestación con la estructura OpenSpec existente (cero convenciones paralelas)",
+    "Habilitar especialistas DB2/RPG como agentes standalone que el orquestador también puede invocar",
+    "Definir un sync point explícito entre las fases paralelas Spec y Design antes de Tasks",
+    "Integrar SDD Init como fase 0 que lee openspec/config.yaml y genera .openspec.yaml del cambio",
+    "Hacer el ecosistema usable por un equipo completo de desarrollo con un único stack de agentes"
+  ],
+  "nonGoals": [
+    "No se modifica el formato ni la estructura de directorios de OpenSpec",
+    "No se reescribe la lógica de negocio interna de cada agente (solo sus contratos de I/O)",
+    "No se implementa ejecución paralela real (VS Code Copilot es secuencial); se diseña para secuencial con sync points",
+    "No se crea tooling externo ni CLI — el scope es exclusivamente .agent.md y el message schema",
+    "No se migra fuera de VS Code + GitHub Copilot agents"
+  ],
+  "successMetrics": [
+    "0 errores de length limit en flujos completos de 5+ fases",
+    "Todos los artefactos intermedios y finales viven en openspec/changes/<change-name>/ sin directorios externos",
+    "Los especialistas DB2/RPG funcionan invocados directamente por el usuario Y desde el orquestador",
+    "Cualquier miembro del equipo puede abrir openspec/changes/<change-name>/ y seguir el trabajo del pipeline sin documentación adicional",
+    "El response inline de cada subagente es solo metadata (< 150 tokens)"
+  ],
+  "openQuestions": [
+    "¿El exploration result debe ser un archivo independiente en changes/<change-name>/exploration.md o se integra como sección en proposal.md?",
+    "¿Los apply artifacts (SQL generado, fuentes RPG) viven dentro de changes/<change-name>/apply/ o en el directorio del proyecto fuente?",
+    "¿.openspec.yaml del cambio almacena las modalities detectadas (db2/rpg) o se prefiere un campo en config.yaml?",
+    "¿El orquestador crea el directorio changes/<change-name>/ o lo crea SDD Init?"
+  ],
+  "stack": {
+    "framework": "VS Code + GitHub Copilot Agents (.agent.md)",
+    "hosting": "Local — workspace del proyecto",
+    "persistence": "OpenSpec file structure (openspec/)",
+    "auth": "N/A"
+  },
+  "routes": [],
+  "uiNotes": [],
+  "dataModel": [
+    {
+      "entity": "SDD Message Schema (XML)",
+      "fields": [
+        "sdd_phase: enum(init|explore|propose|spec|design|task|apply|verify|archive)",
+        "change_name: string — nombre del cambio activo (clave de path OpenSpec)",
+        "task_id: string — único por delegación",
+        "output_contract: { format, max_items, max_tokens_hint, write_to (ruta OpenSpec relativa) }",
+        "handoff_ref: { artifact_path, summary, scope_exceeded, resume_hint }",
+        "modality: enum[](db2|rpg) — condicional para FASE APPLY",
+        "mode: enum(orchestrated|standalone) — para especialistas"
+      ]
+    },
+    {
+      "entity": "OpenSpec Change Directory (paths de referencia)",
+      "fields": [
+        "base: openspec/changes/<change-name>/",
+        "metadata: openspec/changes/<change-name>/.openspec.yaml",
+        "exploration: openspec/changes/<change-name>/exploration.md",
+        "proposal: openspec/changes/<change-name>/proposal.md",
+        "specs: openspec/changes/<change-name>/specs/<domain>/spec.md",
+        "design: openspec/changes/<change-name>/design.md",
+        "tasks: openspec/changes/<change-name>/tasks.md",
+        "apply_db2: openspec/changes/<change-name>/apply/db2/",
+        "apply_rpg: openspec/changes/<change-name>/apply/rpg/",
+        "archive_dest: openspec/changes/archive/YYYY-MM-DD-<change-name>/"
+      ]
+    },
+    {
+      "entity": "Output Contract",
+      "fields": [
+        "format: enum(markdown|yaml|openspec-spec|openspec-design|openspec-tasks)",
+        "max_items: number — límite de elementos en listas",
+        "max_tokens_hint: number — presupuesto de output sugerido",
+        "write_to: string — path relativo dentro de openspec/changes/<change-name>/",
+        "inline_response: enum(metadata_only|summary_and_path)"
+      ]
+    },
+    {
+      "entity": "Handoff Ref (response inline estándar)",
+      "fields": [
+        "artifact_path: string — ruta OpenSpec escrita",
+        "summary: string (< 80 palabras)",
+        "scope_exceeded: boolean",
+        "resume_hint: string — instrucción para re-delegación con offset",
+        "next_phase: string — sugerencia al orquestador"
+      ]
+    }
+  ],
+  "importFormat": {
+    "description": "N/A",
+    "example": {}
+  },
+  "rules": [
+    "REGLA 1 — OpenSpec como fuente única de verdad: Todos los artefactos (exploración, propuesta, spec, design, tasks, apply, archive) viven en openspec/changes/<change-name>/. Cero directorios paralelos.",
+    "REGLA 2 — File-based handoff obligatorio: Ningún subagente retorna contenido generado inline. Escribe a OpenSpec → retorna { artifact_path, summary }.",
+    "REGLA 3 — Output contract en cada delegación: El orquestador siempre incluye <output_contract> con write_to apuntando a la ruta OpenSpec correcta.",
+    "REGLA 4 — Orquestador ciego al contenido: El orquestador NO lee el contenido de los artefactos. Solo verifica existencia de paths y enruta.",
+    "REGLA 5 — Separation of concerns estricta: Explorer → solo paths+razones. Propose → solo proposal.md. Spec → solo specs/<domain>/spec.md. Design → solo design.md. Tasks → solo tasks.md.",
+    "REGLA 6 — Sync point Spec||Design antes de Tasks: El orquestador verifica existencia de design.md Y specs/<domain>/spec.md antes de delegar a SDD Task.",
+    "REGLA 7 — Init como fase 0: SDD Init lee openspec/config.yaml, detecta stack y modalities, escribe .openspec.yaml del cambio con los campos necesarios para el pipeline.",
+    "REGLA 8 — Modo dual de especialistas: En mode=orchestrated, los especialistas leen desde tasks.md y escriben a apply/db2/ o apply/rpg/ retornando metadata_only. En mode=standalone, aceptan input directo del usuario y retornan full_content.",
+    "REGLA 9 — Scope exceeded graceful: Si un subagente excede el output_contract, retorna resultados parciales con scope_exceeded: true y resume_hint. El orquestador re-delega con el hint como input.",
+    "REGLA 10 — change_name propagado: El orquestador inyecta change_name en cada delegación. Los subagentes construyen sus paths como openspec/changes/{change_name}/..."
+  ],
+  "qualityGates": [
+    "Cada .agent.md refactorizado incluye sección '## Output Contract' con format, write_to y inline_response",
+    "El message schema XML está documentado en openspec/schemas/sdd-message-schema.md",
+    "Los especialistas responden correctamente en modo standalone (test manual de invocación directa)",
+    "Un flujo completo Init→Archive genera todos los artefactos dentro de openspec/changes/<change-name>/ sin errores de length limit",
+    "El .agent.md del orquestador no excede 800 líneas para preservar su propio contexto liviano"
+  ],
+  "stories": [
+    {
+      "id": "US-001",
+      "title": "Definir message schema XML en openspec/schemas/",
+      "status": "open",
+      "dependsOn": [],
+      "description": "Como desarrollador del ecosistema SDD, quiero un schema XML documentado dentro de OpenSpec para la comunicación inter-agente, de modo que los mensajes entre orquestador y subagente sean tipados y cualquier miembro del equipo pueda entenderlos.",
+      "acceptanceCriteria": [
+        "Crear openspec/schemas/sdd-message-schema.md con la especificación completa",
+        "El schema define: <sdd_task>, <sdd_phase>, <change_name>, <output_contract>, <handoff_ref>, <modality>, <mode>",
+        "write_to en output_contract es siempre una ruta relativa a openspec/changes/<change_name>/",
+        "Incluir 3 ejemplos: delegación a SDD Explore, a SDD Spec, a Specialist DB2 Designer en mode=orchestrated",
+        "Ejemplo positivo: mensaje completo con todos los campos → subagente parsea y escribe artefacto correctamente",
+        "Ejemplo negativo: mensaje sin <output_contract> → subagente responde con error descriptivo sin generar output",
+        "Incluir tabla de qué campos son obligatorios vs opcionales por fase"
+      ]
+    },
+    {
+      "id": "US-002",
+      "title": "Refactorizar SDD Init — bootstrap desde openspec/config.yaml",
+      "status": "open",
+      "dependsOn": ["US-001"],
+      "description": "Como orquestador SDD, quiero que SDD Init lea openspec/config.yaml, detecte el stack tecnológico y modalities del proyecto, y cree el .openspec.yaml del cambio activo con los campos necesarios para el pipeline.",
+      "acceptanceCriteria": [
+        "SDD Init lee openspec/config.yaml para obtener configuración base del proyecto",
+        "Detecta modalities analizando el workspace: presencia de fuentes RPG → modality 'rpg', DDL/SQL DB2 → modality 'db2'",
+        "Crea openspec/changes/<change-name>/.openspec.yaml con: { schema, created_at, modalities: [], change_name, sdd_pipeline_version }",
+        "Output contract: write_to='changes/<change-name>/.openspec.yaml', inline_response=metadata_only",
+        "Response inline: { artifact_path, summary, modalities_detected, change_name }",
+        "Ejemplo: proyecto AS/400 con .rpgle y DDL → .openspec.yaml con modalities: ['db2', 'rpg']",
+        "Negativo: openspec/config.yaml no existe → Init falla con mensaje claro indicando que OpenSpec no está inicializado"
+      ]
+    },
+    {
+      "id": "US-003",
+      "title": "Refactorizar SDD Explore con output contract y file-based handoff",
+      "status": "open",
+      "dependsOn": ["US-001"],
+      "description": "Como orquestador SDD, quiero que SDD Explore escriba los archivos afectados a exploration.md dentro del cambio activo, retornando solo metadata inline para evitar length limit.",
+      "acceptanceCriteria": [
+        "Output contract: format=markdown, max_items=30, write_to='changes/<change-name>/exploration.md', inline_response=metadata_only",
+        "exploration.md contiene una lista estructurada: path, razón de relevancia, prioridad (alta/media/baja)",
+        "Response inline: { artifact_path: 'openspec/changes/<change-name>/exploration.md', summary, file_count, scope_exceeded }",
+        "Si hay más de 30 archivos relevantes: escribe los primeros 30 ordenados por prioridad + scope_exceeded: true + resume_hint con criterio de continuación",
+        "Explore es skipeable: el orquestador puede pasar directamente a Propose si el usuario lo indica",
+        "Ejemplo: cambio en módulo de facturación → exploration.md con 8 fuentes RPG + 3 DDL, inline con file_count: 11",
+        "Negativo: workspace sin archivos relevantes al cambio → exploration.md vacío con nota explicativa, no error"
+      ]
+    },
+    {
+      "id": "US-004",
+      "title": "Refactorizar SDD Propose con escritura a openspec/changes/<change-name>/proposal.md",
+      "status": "open",
+      "dependsOn": ["US-001", "US-002"],
+      "description": "Como orquestador SDD, quiero que SDD Propose genere proposal.md dentro del directorio del cambio activo, sin retornar el contenido inline.",
+      "acceptanceCriteria": [
+        "SDD Propose lee exploration.md (si existe) y .openspec.yaml para contexto",
+        "Escribe openspec/changes/<change-name>/proposal.md en formato OpenSpec estándar",
+        "proposal.md incluye: qué, por qué, alcance, modalities que aplican, fases del pipeline que se ejecutarán",
+        "Output contract: format=openspec, write_to='changes/<change-name>/proposal.md', inline_response=metadata_only",
+        "Response inline: { artifact_path, summary (<80 palabras), modalities_confirmed, phases_to_run: [] }",
+        "Ejemplo: propuesta para cambio en programa RPG con impacto en tabla DB2 → proposal.md con modalities: ['db2','rpg'], phases_to_run: ['spec','design','task','apply']",
+        "Negativo: propuesta demasiado amplia → scope_exceeded: true, resume_hint recomendando dividir en múltiples cambios"
+      ]
+    },
+    {
+      "id": "US-005",
+      "title": "Refactorizar SDD Spec con escritura a openspec/changes/<change-name>/specs/",
+      "status": "open",
+      "dependsOn": ["US-001", "US-004"],
+      "description": "Como orquestador SDD, quiero que SDD Spec genere el delta spec dentro del directorio del cambio, leyendo la propuesta desde disco sin que el orquestador pase el contenido inline.",
+      "acceptanceCriteria": [
+        "SDD Spec lee openspec/changes/<change-name>/proposal.md directamente desde disco",
+        "Escribe el delta spec en openspec/changes/<change-name>/specs/<domain>/spec.md",
+        "Si el cambio afecta múltiples dominios: genera un spec.md por dominio, todos dentro de changes/<change-name>/specs/",
+        "Output contract: format=openspec-spec, write_to='changes/<change-name>/specs/<domain>/spec.md', inline_response=metadata_only",
+        "Response inline: { artifact_paths: [], domains_covered: [], summary }",
+        "SDD Spec NO lee ni depende de design.md — solo depende de proposal.md",
+        "Ejemplo: propuesta de cambio en módulo de clientes → specs/clientes/spec.md generado",
+        "Negativo: proposal.md no existe en disco → Spec retorna error indicando que debe ejecutarse SDD Propose primero"
+      ]
+    },
+    {
+      "id": "US-006",
+      "title": "Refactorizar SDD Design con escritura a openspec/changes/<change-name>/design.md",
+      "status": "open",
+      "dependsOn": ["US-001", "US-004"],
+      "description": "Como orquestador SDD, quiero que SDD Design genere design.md dentro del directorio del cambio, leyendo la propuesta desde disco, independiente de Spec.",
+      "acceptanceCriteria": [
+        "SDD Design lee openspec/changes/<change-name>/proposal.md directamente desde disco",
+        "Escribe openspec/changes/<change-name>/design.md en formato OpenSpec",
+        "design.md documenta el 'cómo' técnico: arquitectura de la solución, componentes a modificar, decisiones técnicas",
+        "Output contract: format=openspec-design, write_to='changes/<change-name>/design.md', inline_response=metadata_only",
+        "Response inline: { artifact_path, summary, components_affected: [] }",
+        "SDD Design NO lee ni depende de specs/ — solo depende de proposal.md",
+        "Ejemplo: propuesta de nueva tabla y programa de validación → design.md con DDL propuesto y estructura del programa RPG",
+        "Negativo: proposal.md no existe → Design retorna error indicando dependencia, no genera output parcial"
+      ]
+    },
+    {
+      "id": "US-007",
+      "title": "Implementar SYNC POINT Spec||Design en el orquestador antes de SDD Task",
+      "status": "open",
+      "dependsOn": ["US-005", "US-006"],
+      "description": "Como orquestador SDD, quiero un mecanismo de sync point que garantice que ambos artefactos (specs/ y design.md) existan en el directorio del cambio antes de delegar a SDD Task.",
+      "acceptanceCriteria": [
+        "El orquestador verifica existencia de openspec/changes/<change-name>/design.md",
+        "El orquestador verifica existencia de al menos un openspec/changes/<change-name>/specs/<domain>/spec.md",
+        "Solo cuando ambas verificaciones pasan, el orquestador delega a SDD Task",
+        "Si Spec retornó scope_exceeded: el orquestador re-delega Spec con resume_hint antes del sync",
+        "Si Design retornó scope_exceeded: igual — re-delega Design antes del sync",
+        "El sync point está documentado como una sección explícita en el .agent.md del orquestador: '## Sync Point: Pre-Tasks'",
+        "Ejemplo: Spec termina, Design aún no existe → orquestador ejecuta Design → luego verifica sync → delega Tasks",
+        "Negativo: cualquier artefacto falta después de 2 reintentos → orquestador reporta fase bloqueada al usuario"
+      ]
+    },
+    {
+      "id": "US-008",
+      "title": "Refactorizar SDD Task con lectura desde disc y escritura a openspec/changes/<change-name>/tasks.md",
+      "status": "open",
+      "dependsOn": ["US-007"],
+      "description": "Como orquestador SDD, quiero que SDD Task lea spec y design desde disco para generar tasks.md dentro del cambio, sin que el contenido pase por el contexto del orquestador.",
+      "acceptanceCriteria": [
+        "SDD Task lee openspec/changes/<change-name>/specs/<domain>/spec.md y design.md directamente",
+        "Escribe openspec/changes/<change-name>/tasks.md como checklist en formato OpenSpec",
+        "Cada task en tasks.md incluye: id, título, fase (db2|rpg|general), descripción, criterios de aceptación",
+        "El campo fase determina qué especialista ejecutará cada task en FASE APPLY",
+        "Output contract: format=openspec-tasks, write_to='changes/<change-name>/tasks.md', inline_response=metadata_only",
+        "Response inline: { artifact_path, summary, task_count, phases_required: ['db2','rpg'] }",
+        "Ejemplo: spec con nueva tabla + programa → tasks.md con tasks DB2 (DDL) y tasks RPG (programa)",
+        "Negativo: spec y design contienen decisiones contradictorias → SDD Task retorna error detallado sin generar tasks.md"
+      ]
+    },
+    {
+      "id": "US-009",
+      "title": "Refactorizar Specialist DB2 Designer y DB2 Verify con modo dual y paths OpenSpec",
+      "status": "open",
+      "dependsOn": ["US-001", "US-008"],
+      "description": "Como usuario del ecosistema SDD, quiero poder invocar DB2 Designer y DB2 Verify directamente para tareas puntuales de base de datos, o que el orquestador los invoque en FASE APPLY, usando el mismo .agent.md.",
+      "acceptanceCriteria": [
+        "DB2 Designer en mode=orchestrated: lee tasks.md, escribe DDL/SQL a openspec/changes/<change-name>/apply/db2/<task-id>.sql, retorna metadata_only",
+        "DB2 Designer en mode=standalone: acepta instrucción directa del usuario (DDL, schema change), retorna SQL completo inline sin escribir a OpenSpec",
+        "DB2 Verify en mode=orchestrated: lee openspec/changes/<change-name>/apply/db2/<task-id>.sql, valida, escribe resultado a apply/db2/<task-id>-verify.md",
+        "DB2 Verify en mode=standalone: acepta DDL/SQL directo del usuario, retorna análisis completo inline",
+        "El orquestador delega secuencialmente: DB2 Designer → verifica artifact_path → DB2 Verify",
+        "Ejemplo standalone: 'valida este ALTER TABLE' → DB2 Verify responde inline con análisis de impacto completo",
+        "Ejemplo orquestado: task T-001 (db2) → Designer escribe .sql → Verify valida → ambos retornan paths en OpenSpec",
+        "Negativo: DB2 Verify detecta error (ej. column type incompatible) → status: failed, issues: [...], orquestador re-delega a Designer"
+      ]
+    },
+    {
+      "id": "US-010",
+      "title": "Refactorizar Specialist RPG Apply y RPG Verify con modo dual y paths OpenSpec",
+      "status": "open",
+      "dependsOn": ["US-001", "US-008"],
+      "description": "Como usuario del ecosistema SDD, quiero poder invocar RPG Apply y RPG Verify directamente para trabajo puntual en fuentes RPG, o que el orquestador los invoque desde FASE APPLY.",
+      "acceptanceCriteria": [
+        "RPG Apply en mode=orchestrated: lee tasks.md, escribe fuente RPG a openspec/changes/<change-name>/apply/rpg/<task-id>.rpgle, retorna metadata_only",
+        "RPG Apply en mode=standalone: acepta instrucción directa del usuario, retorna código RPG completo inline",
+        "RPG Verify en mode=orchestrated: lee apply/rpg/<task-id>.rpgle, valida, escribe resultado a apply/rpg/<task-id>-verify.md",
+        "RPG Verify en mode=standalone: acepta código RPG directo del usuario, retorna análisis inline",
+        "El orquestador delega secuencialmente: RPG Apply → verifica artifact_path → RPG Verify",
+        "Ejemplo standalone: 'genera subprocedimiento RPG para leer CUSTFILE por clave' → RPG Apply retorna código completo",
+        "Ejemplo orquestado: task T-003 (rpg) → Apply genera .rpgle → Verify valida → paths en openspec/changes/.../apply/rpg/",
+        "Negativo: RPG Verify detecta error de lógica potencial → status: failed, issues con descripción, orquestador re-delega a RPG Apply"
+      ]
+    },
+    {
+      "id": "US-011",
+      "title": "Refactorizar SDD Archive para mover cambio a openspec/changes/archive/",
+      "status": "open",
+      "dependsOn": ["US-009", "US-010"],
+      "description": "Como orquestador SDD, quiero que SDD Archive consolide el directorio del cambio activo y lo mueva a openspec/changes/archive/YYYY-MM-DD-<change-name>/ siguiendo la convención OpenSpec.",
+      "acceptanceCriteria": [
+        "SDD Archive verifica que todos los artefactos esperados existen en openspec/changes/<change-name>/",
+        "Genera un índice de cierre dentro del directorio del cambio: openspec/changes/<change-name>/archive-summary.md",
+        "archive-summary.md incluye: fases completadas, artefactos generados, fecha, modalities ejecutadas",
+        "Mueve (renombra) el directorio a openspec/changes/archive/YYYY-MM-DD-<change-name>/",
+        "Output contract: write_to='changes/archive/YYYY-MM-DD-<change-name>/', inline_response=metadata_only",
+        "Response inline: { archive_path, summary, phases_completed, artifacts_count }",
+        "Ejemplo: cambio 'add-customer-validation' completado el 2026-05-12 → archivado en archive/2026-05-12-add-customer-validation/",
+        "Negativo: artefacto esperado ausente (ej. tasks.md no existe) → Archive lo marca como 'missing' en el índice y archiva igualmente con estado incompleto"
+      ]
+    },
+    {
+      "id": "US-012",
+      "title": "Refactorizar el orquestador principal como router puro con routing condicional por modality",
+      "status": "open",
+      "dependsOn": ["US-002", "US-003", "US-004", "US-005", "US-006", "US-007", "US-008", "US-011"],
+      "description": "Como equipo de desarrollo, quiero un orquestador liviano que enrute el flujo SDD completo leyendo las modalities del .openspec.yaml, sin cargar contenido en su contexto, para trabajar eficientemente en cualquier proyecto.",
+      "acceptanceCriteria": [
+        "El orquestador lee las modalities de openspec/changes/<change-name>/.openspec.yaml (escrito por Init) para decidir qué fases de APPLY ejecutar",
+        "Cada delegación incluye el message schema completo: <sdd_task> con sdd_phase, change_name, output_contract con write_to en OpenSpec",
+        "El orquestador NUNCA lee el contenido de los artefactos — solo verifica existencia de paths",
+        "Flujo completo implementado: Init → [Explore?] → Propose → Spec||Design → SYNC_POINT → Tasks → APPLY(DB2? RPG?) → Archive",
+        "Explore es skipeable: el orquestador lo omite si el usuario indica skip o si exploration.md ya existe",
+        "APPLY es condicional: si modalities=['rpg'] solo ejecuta RPG Apply + RPG Verify; si ['db2','rpg'] ejecuta ambas cadenas",
+        "RETRY implementado: si handoff_ref.scope_exceeded=true → re-delega con resume_hint como input adicional",
+        "El .agent.md del orquestador tiene secciones explícitas: ## Flow, ## Sync Points, ## Conditional Apply, ## Retry Policy",
+        "Ejemplo: proyecto solo RPG → Init detecta ['rpg'] → APPLY omite DB2 completamente",
+        "Negativo: subagente no retorna artifact_path → orquestador reporta fase bloqueada al usuario con nombre de fase y razón",
+        "El .agent.md del orquestador no excede 800 líneas"
+      ]
+    },
+    {
+      "id": "US-013",
+      "title": "Documentar uso standalone de especialistas para el equipo",
+      "status": "open",
+      "dependsOn": ["US-009", "US-010"],
+      "description": "Como miembro del equipo de desarrollo, quiero documentación en OpenSpec sobre cuándo y cómo usar los especialistas directamente, para tareas puntuales sin necesidad del flujo completo.",
+      "acceptanceCriteria": [
+        "Crear openspec/schemas/standalone-specialists-guide.md",
+        "Incluir decision matrix: cuándo usar standalone vs flujo orquestado completo",
+        "Casos de uso standalone para cada especialista: DB2 Designer, DB2 Verify, RPG Apply, RPG Verify con ejemplos de prompts directos",
+        "Los especialistas standalone NO requieren .openspec.yaml ni tasks.md — funcionan con input directo del usuario",
+        "Ejemplo de cuándo usar standalone: revisar un ALTER TABLE puntual, generar un subprocedimiento RPG aislado",
+        "Ejemplo de cuándo usar flujo completo: cambio que afecta múltiples programas, tablas y tiene impacto en specs",
+        "Negativo documentado: usar standalone para un cambio que afecta 5+ artefactos → guía recomienda flujo orquestado"
+      ]
+    },
+    {
+      "id": "US-014",
+      "title": "Test de integración — flujo completo sin length limit en proyecto real",
+      "status": "open",
+      "dependsOn": ["US-012"],
+      "description": "Como equipo de desarrollo, queremos verificar que el ecosistema refactorizado completa un flujo Init→Archive en un proyecto real sin errores de length limit y con todos los artefactos en la estructura OpenSpec correcta.",
+      "acceptanceCriteria": [
+        "Ejecutar flujo completo en un proyecto con al menos 1 fuente RPG y 1 tabla DB2",
+        "Verificar que openspec/changes/<change-name>/ contiene: .openspec.yaml, exploration.md, proposal.md, specs/<domain>/spec.md, design.md, tasks.md, apply/db2/, apply/rpg/",
+        "Ninguna fase produce 'response hit the length limit'",
+        "Todos los responses inline son < 150 tokens (solo metadata + path)",
+        "El directorio queda correctamente archivado en openspec/changes/archive/YYYY-MM-DD-<change-name>/",
+        "Ejecutar también test standalone: invocar DB2 Verify directamente con un DDL puntual → responde inline sin necesitar OpenSpec",
+        "Negativo: si alguna fase falla, el orquestador identifica la fase bloqueada y el motivo sin crashear el flujo completo"
+      ]
+    }
+  ]
+}
